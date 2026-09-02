@@ -1,0 +1,14 @@
+{
+  "name": "taildog-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted one-time fuse server for Taildog (zero dependencies).",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "dev": "node --watch src/index.mjs"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

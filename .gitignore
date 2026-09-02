@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+
+# databases (fuse server)
+*.db
+*.db-wal
+*.db-shm
+
+# capacitor / android build artifacts
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/.idea/
+
+# misc
+.DS_Store
+*.log
+.env
