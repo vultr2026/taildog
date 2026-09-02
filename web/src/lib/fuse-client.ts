@@ -2,6 +2,11 @@ import { FUSE_B64_RE } from "@/lib/bytes";
 
 const STORAGE_KEY = "taildog.fuseServer";
 
+// Build-time default (set via VITE_FUSE_SERVER at build). The user's in-app
+// Settings override this, so a changing tunnel URL can be fixed without a rebuild.
+const DEFAULT_SERVER =
+  ((import.meta.env.VITE_FUSE_SERVER as string | undefined) ?? "").trim() || undefined;
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -19,10 +24,22 @@ export type ConsumeResult =
 export function getFuseServer(): string | null {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    return v && v.trim() ? v.trim() : null;
+    if (v && v.trim()) return v.trim();
   } catch {
-    return null;
+    // ignore storage failures
   }
+  return DEFAULT_SERVER || null;
+}
+
+/** Where the currently effective server URL comes from. */
+export function getFuseServerSource(): "override" | "default" | "none" {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY);
+    if (v && v.trim()) return "override";
+  } catch {
+    // ignore
+  }
+  return DEFAULT_SERVER ? "default" : "none";
 }
 
 export function setFuseServer(url: string): void {

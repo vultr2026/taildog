@@ -56,9 +56,66 @@ To share with people on the internet, expose the server publicly:
 - a **VPS** (run `server/` there and open the port), or
 - **port forwarding / tunnel** (frp, ngrok, etc.) to your local `8787`.
 
-Then enter that public address in Settings. For a web app served over HTTPS you will also need
-HTTPS on the server — see [`server/README.md`](server/README.md) (Caddy/Nginx reverse proxy, or the
-built-in TLS switch).
+Then the recipient needs to know **where the fuse server is**. There are two ways to give them the
+address (it is *not* a secret — the server never sees plaintext or passphrases, only a random key):
+
+1. **Bake it into the build** (zero-config for the recipient — recommended if your address is stable).
+2. **Tell them the URL** and let them paste it in the app's **Settings** tab (needed if your address
+   changes, e.g. the free ngrok random sub-domain changes on every restart).
+
+### Bake the server address into the build
+
+Set `VITE_FUSE_SERVER` when building. The value becomes the app's default; the recipient still can
+override it later in Settings if needed.
+
+```bash
+# Web build (replace with YOUR public https address from ngrok/VPS)
+cd web
+VITE_FUSE_SERVER=https://your-id.ngrok-free.app npm run build
+# -> dist/ is now hard-wired to that server, no setup needed on the other side
+```
+
+For a web app served over HTTPS you will also need HTTPS on the server — see
+[`server/README.md`](server/README.md) (Caddy/Nginx reverse proxy, or the built-in TLS switch).
+
+> Tip: with ngrok, **prefer the `https://` address**. Inside the Android app the WebView runs in a
+> secure context, and requesting a plain `http://` server would otherwise be blocked as mixed content.
+
+## Sending a letter to the other party
+
+1. You (the writer) write the message + a passphrase only the two of you know → **Seal** → copy the
+   ciphertext.
+2. Send the **ciphertext** to the recipient over any channel (WeChat / email / etc.).
+3. Send the **passphrase separately** — never in the same message as the ciphertext.
+4. The recipient opens the app (APK or web link), pastes the ciphertext + passphrase under **Open**,
+   and the letter opens once, then burns.
+
+The fuse-server address is just the location of the shared "mailbox" — it is not a secret and does
+not need to travel with the ciphertext.
+
+## Android APK (Capacitor)
+
+The app is packaged as a native Android APK with Capacitor. Prerequisites on the build machine:
+Node ≥ 22, **JDK 21** (Capacitor 8's `capacitor-android` compiles against source level 21 — JDK 17 fails with "invalid source release: 21"), and the Android SDK (platform 36 + build-tools 36 + platform-tools).
+
+```bash
+# 1. build web assets with the server address baked in
+cd web
+VITE_FUSE_SERVER=https://your-id.ngrok-free.app npm run build
+
+# 2. sync assets into the native android project (regenerates android/app/src/main/assets/public/)
+npx cap sync android
+
+# 3. build the debug APK (run from web/, needs JAVA_HOME=JDK21 and ANDROID_HOME set)
+export JAVA_HOME="/c/Program Files/Java/jdk-17.0.2"
+export ANDROID_HOME="/c/Program Files (x86)/Android/android-sdk"
+cd android && ./gradlew assembleDebug
+
+# -> android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Send `app-debug.apk` to the recipient; on their Android phone allow "Install unknown apps" from the
+source, then install. (A release-signed APK is needed for the Play Store — out of scope here.)
 
 ## Security notes
 
@@ -66,7 +123,3 @@ built-in TLS switch).
 - The server stores only random one-time fuses; it cannot decrypt anything and never sees plaintext
   or passphrases.
 - "Open once" is enforced atomically in SQLite on the server, not just in the client.
-
-## APK
-
-Packaging as an Android APK (via Capacitor) is a follow-up step — see the project plan.

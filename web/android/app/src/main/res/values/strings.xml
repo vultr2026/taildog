@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Taildog</string>
+    <string name="title_activity_main">Taildog</string>
+    <string name="package_name">com.taildog.app</string>
+    <string name="custom_url_scheme">com.taildog.app</string>
+</resources>

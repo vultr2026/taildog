@@ -11,11 +11,10 @@ build/
 *.db-shm
 
 # capacitor / android build artifacts
-android/app/build/
-android/build/
-android/.gradle/
-android/local.properties
-android/.idea/
+build/
+web/android/.gradle/
+web/android/local.properties
+web/android/.idea/
 
 # misc
 .DS_Store

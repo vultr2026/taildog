@@ -2,7 +2,12 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getFuseServer, setFuseServer, testFuseServer } from "@/lib/fuse-client";
+import {
+  getFuseServer,
+  getFuseServerSource,
+  setFuseServer,
+  testFuseServer,
+} from "@/lib/fuse-client";
 
 export function SettingsPanel({
   onServerChanged,
@@ -55,10 +60,17 @@ export function SettingsPanel({
           id="fuse-server"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="http://your-server:8787"
+          placeholder="https://your-tunnel.example.com"
           autoComplete="off"
           spellCheck={false}
         />
+        <p className="text-xs text-ink-subtle">
+          {url.trim()
+            ? "Saved on this device (overrides the default)."
+            : getFuseServerSource() === "default"
+              ? `Using built-in default: ${getFuseServer()}`
+              : "Not set — enter your server address above."}
+        </p>
       </div>
 
       {status ? <p className="text-sm text-ink-muted">{status}</p> : null}
