@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Check, Copy, Download, Eye, EyeOff } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,8 +10,9 @@ import {
   passwordStrength,
   sealPlaintext,
 } from "@/lib/crypto";
-import { depositFuse } from "@/lib/fuse-client";
-import { encodeArmor, FUSE_TTL_DAYS, MAX_PLAINTEXT } from "@/lib/payload";
+import { depositLetter, fetchServerId, getFuseServer } from "@/lib/fuse-client";
+import { serverTag } from "@/lib/server-tag";
+import { FUSE_TTL_DAYS, MAX_PLAINTEXT } from "@/lib/payload";
 import { cn } from "@/lib/utils";
 
 export function WritePanel() {
@@ -20,7 +21,7 @@ export function WritePanel() {
   const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [armor, setArmor] = useState<string | null>(null);
+  const [share, setShare] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const strength = useMemo(() => passwordStrength(password), [password]);
 
@@ -39,19 +40,26 @@ export function WritePanel() {
       setError(`Message is too long. Maximum ${MAX_PLAINTEXT.toLocaleString()} characters.`);
       return;
     }
-    if (password.length < 4) {
-      setError("Passphrase must be at least 4 characters. A phrase only the two of you know works best.");
+    if (password.length < 8) {
+      setError("Passphrase must be at least 8 characters. A phrase only the two of you know works best.");
+      return;
+    }
+    const server = getFuseServer();
+    if (!server) {
+      setError("No fuse server configured. Open Settings and set your server address.");
       return;
     }
     setBusy(true);
     try {
+      const info = await fetchServerId();
+      const tag = await serverTag(info.serverId);
       const fuse = newFuse();
-      const deposited = await depositFuse({ fuse });
-      const payload = await sealPlaintext(text, password, deposited.id, fuse);
-      setArmor(encodeArmor(payload));
+      const payload = await sealPlaintext(text, password, fuse, fuse);
+      const deposited = await depositLetter({ fuse, ct: JSON.stringify(payload) });
+      setShare(`${tag}.${deposited.id}`);
     } catch (err) {
       const code = err instanceof Error ? err.message : "";
-      if (code === "NOSERVER") {
+      if (code === "NOSERVER" || code === "SERVER_INFO_FAILED") {
         setError("No fuse server configured. Open Settings and set your server address.");
       } else {
         setError("Sealing failed. Check your connection and try again.");
@@ -61,10 +69,15 @@ export function WritePanel() {
     }
   }
 
+  function shareLink(): string {
+    const s = getFuseServer();
+    return s ? `${s.replace(/\/+$/, "")}/#${share}` : "";
+  }
+
   async function onCopy() {
-    if (!armor) return;
+    if (!share) return;
     try {
-      await navigator.clipboard.writeText(armor);
+      await navigator.clipboard.writeText(share);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
@@ -72,47 +85,51 @@ export function WritePanel() {
     }
   }
 
-  function onDownload() {
-    if (!armor) return;
-    const blob = new Blob([armor], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "letter.taildog";
-    a.click();
-    URL.revokeObjectURL(url);
+  async function onCopyLink() {
+    const link = shareLink();
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setError("Copy failed. Long-press the text and copy manually.");
+    }
   }
 
   function onReset() {
-    setArmor(null);
+    setShare(null);
     setBody("");
     setPassword("");
     setError(null);
   }
 
-  if (armor) {
+  if (share) {
+    const link = shareLink();
     return (
       <section className="flex flex-1 flex-col gap-5">
         <header className="space-y-1">
           <h2 className="font-display text-2xl font-medium tracking-tight text-ink">Sealed</h2>
           <p className="text-sm leading-relaxed text-ink-muted text-pretty">
-            Send the ciphertext below to the recipient. Send the passphrase separately — never in
-            the same message. Once opened, this ciphertext becomes invalid; it also expires after{" "}
+            Send this ID to the recipient (for example over chat). Send the passphrase separately —
+            never in the same message. Once opened, this letter is destroyed; it also expires after{" "}
             {FUSE_TTL_DAYS} days if never opened.
           </p>
         </header>
-        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-paper-2 px-4 py-3 font-mono text-xs leading-relaxed text-ink-muted shadow-[var(--shadow-border)]">
-          {armor}
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-paper-2 px-4 py-3 font-mono text-xs leading-relaxed text-ink-muted shadow-[var(--shadow-border)]">
+          {share}
         </pre>
         <div className="grid grid-cols-2 gap-3">
           <Button type="button" onClick={onCopy}>
             {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-            {copied ? "Copied" : "Copy ciphertext"}
+            {copied ? "Copied" : "Copy ID"}
           </Button>
-          <Button type="button" variant="outline" onClick={onDownload}>
-            <Download className="size-4" />
-            Download file
-          </Button>
+          {link ? (
+            <Button type="button" variant="outline" onClick={onCopyLink}>
+              {copied ? <Check className="size-4" /> : <Link2 className="size-4" />}
+              {copied ? "Copied" : "Copy link"}
+            </Button>
+          ) : null}
         </div>
         <Button type="button" variant="ghost" onClick={onReset}>
           Write another

@@ -37,6 +37,22 @@ db.exec(`
     expires_at  TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS fuses_expires_at_idx ON fuses (expires_at);
+  CREATE TABLE IF NOT EXISTS letters (
+    id          TEXT PRIMARY KEY,
+    fuse        TEXT NOT NULL,
+    ct          TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at  TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS letters_expires_at_idx ON letters (expires_at);
+  CREATE TABLE IF NOT EXISTS letter_burned (
+    id          TEXT PRIMARY KEY,
+    burned_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS meta (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL
+  );
 `);
 
 const ttlInterval = `+${TTL_DAYS} days`;
@@ -54,6 +70,32 @@ const markConsumed = db.prepare(
 const selectFuse = db.prepare(
   "SELECT consumed_at, (expires_at <= datetime('now')) AS expired FROM fuses WHERE id = ?",
 );
+
+// --- Letters (short-ID sharing): ct + fuse stored server-side, burned on open ---
+const insertLetter = db.prepare(
+  "INSERT INTO letters (id, fuse, ct, expires_at) VALUES (?, ?, ?, datetime('now', ?))",
+);
+const selectLetter = db.prepare(
+  "SELECT fuse, ct FROM letters WHERE id = ? AND expires_at > datetime('now')",
+);
+const deleteLetter = db.prepare("DELETE FROM letters WHERE id = ?");
+const insertBurned = db.prepare("INSERT OR IGNORE INTO letter_burned (id) VALUES (?)");
+const selectBurned = db.prepare("SELECT 1 FROM letter_burned WHERE id = ?");
+const getLetterExpiry = db.prepare("SELECT expires_at FROM letters WHERE id = ?");
+const deleteExpiredLetters = db.prepare("DELETE FROM letters WHERE expires_at <= datetime('now')");
+const deleteExpiredBurned = db.prepare(
+  "DELETE FROM letter_burned WHERE burned_at <= datetime('now', ?)",
+);
+
+// Stable per-instance server id (persisted). Used by clients to derive a
+// server-binding tag so the same VPS keeps matching across ngrok restarts.
+const SERVER_ID = (() => {
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'server_id'").get();
+  if (row && row.value) return row.value;
+  const id = randomUUID();
+  db.prepare("INSERT INTO meta (key, value) VALUES ('server_id', ?)").run(id);
+  return id;
+})();
 
 // Atomic, one-shot consumption: read the fuse under an immediate write lock,
 // null it, and commit — so a second request can never obtain the same fuse.
@@ -79,6 +121,32 @@ function consume(id) {
   if (!info) return { status: "missing" };
   if (Number(info.expired) === 1) return { status: "expired" };
   return { status: "consumed" };
+}
+
+// Atomic, one-shot consumption for letters: return the fuse + ciphertext and
+// delete the row so the encrypted blob is never retained after being read.
+function consumeLetter(id) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const row = selectLetter.get(id);
+    if (row) {
+      deleteLetter.run(id);
+      insertBurned.run(id);
+      db.exec("COMMIT");
+      return { status: "ok", fuse: row.fuse, ct: row.ct };
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // rollback failed (connection died) — keep the original error
+    }
+    throw err;
+  }
+  const burned = selectBurned.get(id);
+  if (burned) return { status: "burned" };
+  return { status: "missing" };
 }
 
 function corsHeaders(extra = {}) {
@@ -107,7 +175,7 @@ function readBody(req) {
     let size = 0;
     req.on("data", (c) => {
       size += c.length;
-      if (size > 1_000_000) {
+      if (size > 4_000_000) {
         reject(new Error("payload too large"));
         return;
       }
@@ -168,6 +236,41 @@ async function handler(req, res) {
     return json(res, 200, consume(body.id));
   }
 
+  if (req.method === "GET" && path === "/v1/info") {
+    return json(res, 200, { ok: true, serverId: SERVER_ID });
+  }
+
+  if (req.method === "POST" && path === "/v1/letters") {
+    let body;
+    try {
+      body = await readBody(req);
+    } catch {
+      return json(res, 400, { error: "invalid json body" });
+    }
+    if (typeof body.fuse !== "string" || !FUSE_RE.test(body.fuse)) {
+      return json(res, 400, { error: "invalid fuse" });
+    }
+    if (
+      typeof body.ct !== "string" ||
+      body.ct.length === 0 ||
+      body.ct.length > 4_000_000
+    ) {
+      return json(res, 400, { error: "invalid ct" });
+    }
+    const id = randomUUID();
+    insertLetter.run(id, body.fuse, body.ct, ttlInterval);
+    const row = getLetterExpiry.get(id);
+    return json(res, 201, { id, expiresAt: row ? row.expires_at : null });
+  }
+
+  if (req.method === "GET" && path.startsWith("/v1/letters/")) {
+    const id = decodeURIComponent(path.slice("/v1/letters/".length));
+    if (!UUID_RE.test(id)) return json(res, 400, { error: "invalid id" });
+    const result = consumeLetter(id);
+    if (result.status === "ok") return json(res, 200, result);
+    return json(res, 404, result);
+  }
+
   return json(res, 404, { error: "not found" });
 }
 
@@ -184,4 +287,19 @@ server.listen(PORT, HOST, () => {
     `[taildog] fuse server listening on ${useTls ? "https" : "http"}://${HOST}:${PORT}`,
   );
   console.log(`[taildog] database: ${DB_PATH} (ttl=${TTL_DAYS}d)`);
+  console.log(`[taildog] serverId: ${SERVER_ID}`);
 });
+
+// Periodic purge of expired letters (and their burn receipts) so the encrypted
+// blobs and markers do not accumulate forever.
+function purgeExpired() {
+  try {
+    deleteExpiredLetters.run();
+    deleteExpiredBurned.run(`+${TTL_DAYS} days`);
+  } catch {
+    // ignore purge errors
+  }
+}
+purgeExpired();
+const purgeTimer = setInterval(purgeExpired, 60 * 60 * 1000);
+if (typeof purgeTimer.unref === "function") purgeTimer.unref();

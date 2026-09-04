@@ -5,25 +5,37 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { hasSubtleCrypto, openPlaintext, verifyPassword } from "@/lib/crypto";
-import { consumeFuse } from "@/lib/fuse-client";
-import { decodeArmor } from "@/lib/payload";
+import {
+  consumeFuse,
+  fetchLetter,
+  fetchServerId,
+  getFuseServer,
+} from "@/lib/fuse-client";
+import { serverTag } from "@/lib/server-tag";
+import { decodeArmor, type SealedPayload } from "@/lib/payload";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function formatOpenError(code: string): string {
   switch (code) {
     case "EMPTY":
-      return "Paste the ciphertext, or choose a .taildog file.";
+      return "Paste the ID, the link, or the ciphertext.";
     case "FORMAT":
-      return "This does not look like Taildog ciphertext. Check that you copied it in full.";
+      return "This does not look like a Taildog ID or ciphertext. Check that you copied it in full.";
     case "PASSWORD":
       return "Wrong passphrase. The letter is still intact — it will not burn from a wrong guess.";
     case "NOSERVER":
       return "No fuse server configured. Open Settings and set your server address.";
+    case "SERVER_MISMATCH":
+      return "This letter does not belong to your current server. Open Settings and switch to the correct server address.";
     case "consumed":
+    case "burned":
       return "This letter has already been opened and cannot be read again.";
     case "expired":
       return "This letter has expired; the fuse has been voided.";
     case "missing":
-      return "This letter could not be found. The ciphertext may be incomplete, or it belongs to another server.";
+      return "This letter could not be found. The ID may be incomplete, or it belongs to another server.";
     case "CIPHER":
       return "The ciphertext is damaged. The fuse has been withdrawn and cannot be retried.";
     case "HTTPS":
@@ -31,6 +43,25 @@ function formatOpenError(code: string): string {
     default:
       return "Opening failed. Check your connection and try again.";
   }
+}
+
+// Parse a shared artifact into { tag, id }. Accepts a bare "tag.id", a URL
+// ending in "#tag.id", or a path segment ".../tag.id".
+function parseShare(input: string): { tag: string; id: string } {
+  let s = input.trim();
+  const hashIdx = s.indexOf("#");
+  if (hashIdx >= 0) s = s.slice(hashIdx + 1).trim();
+  if (s.includes("/")) {
+    const parts = s.split("/").filter(Boolean);
+    s = parts[parts.length - 1] ?? s;
+  }
+  s = s.trim();
+  const dot = s.indexOf(".");
+  if (dot <= 0 || dot >= s.length - 1) throw new Error("FORMAT");
+  const tag = s.slice(0, dot);
+  const id = s.slice(dot + 1);
+  if (!UUID_RE.test(id)) throw new Error("FORMAT");
+  return { tag, id };
 }
 
 export function OpenPanel({
@@ -67,8 +98,41 @@ export function OpenPanel({
       setError("Enter the passphrase.");
       return;
     }
+    const input = raw.trim();
+    if (!input) {
+      setError(formatOpenError("EMPTY"));
+      return;
+    }
+    const server = getFuseServer();
+    if (!server) {
+      setError(formatOpenError("NOSERVER"));
+      return;
+    }
     setBusy(true);
     try {
+      // New short-ID flow: "tag.id" (or a link/path ending in it).
+      if (!input.startsWith("taildog-1.") && !input.startsWith("{")) {
+        const ref = parseShare(input);
+        const info = await fetchServerId();
+        const localTag = await serverTag(info.serverId);
+        if (ref.tag !== localTag) {
+          throw new Error("SERVER_MISMATCH");
+        }
+        const res = await fetchLetter({ id: ref.id });
+        if (res.status !== "ok") {
+          setError(formatOpenError(res.status));
+          return;
+        }
+        const payload = JSON.parse(res.ct) as SealedPayload;
+        const pwBits = await verifyPassword(payload, password);
+        const plaintext = await openPlaintext(payload, pwBits, res.fuse);
+        onOpened(plaintext);
+        setRaw("");
+        setPassword("");
+        return;
+      }
+
+      // Legacy armor flow.
       const payload = decodeArmor(raw);
       const pwBits = await verifyPassword(payload, password);
       const consumed = await consumeFuse({ id: payload.id });
@@ -116,7 +180,7 @@ export function OpenPanel({
           id="sealed-body"
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
-          placeholder="Paste ciphertext starting with taildog-1. …"
+          placeholder="Paste the ID (tag.uuid), a link, or a taildog-1. ciphertext…"
           className="min-h-40 font-mono text-xs leading-relaxed"
         />
       </div>

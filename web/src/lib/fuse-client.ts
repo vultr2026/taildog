@@ -88,6 +88,60 @@ export async function consumeFuse(data: { id: string }): Promise<ConsumeResult> 
   return (await res.json()) as ConsumeResult;
 }
 
+// --- Short-ID sharing (letters) ---
+
+export type LetterResult = { id: string; expiresAt: string | null };
+
+export type OpenLetterResult =
+  | { status: "ok"; fuse: string; ct: string }
+  | { status: "burned" }
+  | { status: "missing" };
+
+/** Fetch the server's stable id, used by clients to derive a server-binding tag. */
+export async function fetchServerId(): Promise<{ ok: true; serverId: string }> {
+  const res = await fetch(`${baseUrl()}/v1/info`, { method: "GET" });
+  if (!res.ok) throw new Error("SERVER_INFO_FAILED");
+  return (await res.json()) as { ok: true; serverId: string };
+}
+
+/** Store a sealed letter (fuse + ciphertext) on the server; returns its id. */
+export async function depositLetter(data: {
+  fuse: string;
+  ct: string;
+}): Promise<LetterResult> {
+  if (typeof data.fuse !== "string" || !FUSE_B64_RE.test(data.fuse)) {
+    throw new Error("Invalid fuse");
+  }
+  if (typeof data.ct !== "string" || data.ct.length === 0) {
+    throw new Error("Invalid ct");
+  }
+  const res = await fetch(`${baseUrl()}/v1/letters`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ fuse: data.fuse, ct: data.ct }),
+  });
+  if (!res.ok) throw new Error("DEPOSIT_FAILED");
+  return (await res.json()) as LetterResult;
+}
+
+/** Retrieve and burn a letter. On success returns the fuse + ciphertext. */
+export async function fetchLetter(data: { id: string }): Promise<OpenLetterResult> {
+  if (typeof data.id !== "string" || !UUID_RE.test(data.id)) {
+    throw new Error("Invalid id");
+  }
+  const res = await fetch(`${baseUrl()}/v1/letters/${data.id}`, { method: "GET" });
+  if (!res.ok) {
+    try {
+      const body = await res.json();
+      if (body && body.status) return body as OpenLetterResult;
+    } catch {
+      // fall through to generic error
+    }
+    throw new Error("FETCH_FAILED");
+  }
+  return (await res.json()) as OpenLetterResult;
+}
+
 export async function testFuseServer(url: string): Promise<boolean> {
   try {
     const res = await fetch(`${url.trim().replace(/\/+$/, "")}/healthz`, {
