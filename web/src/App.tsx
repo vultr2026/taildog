@@ -8,6 +8,9 @@ import { SettingsPanel } from "@/components/settings-panel";
 import { hasFuseServer } from "@/lib/fuse-client";
 import { cn } from "@/lib/utils";
 
+// Injected at build time via VITE_APP_VERSION; falls back to "dev" for local runs.
+const APP_VERSION = (import.meta.env.VITE_APP_VERSION as string | undefined) ?? "dev";
+
 type Tab = "write" | "open" | "settings";
 
 export default function App() {
@@ -30,6 +33,7 @@ export default function App() {
           <p className="text-xs tracking-[0.28em] text-ink-subtle">TAILDOG</p>
           <h1 className="font-display text-3xl font-medium tracking-tight text-ink">Taildog</h1>
           <p className="text-sm text-ink-muted">A letter you can open only once.</p>
+          <p className="text-xs text-ink-subtle">v{APP_VERSION}</p>
         </div>
         <SealMark />
       </header>
