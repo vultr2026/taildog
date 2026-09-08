@@ -20,5 +20,3 @@ export function b64urlToBytes(value: string): Uint8Array {
   for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
   return out;
 }
-
-export const FUSE_B64_RE = /^[A-Za-z0-9_-]{43}$/;

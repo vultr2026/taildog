@@ -1,4 +1,4 @@
-import { FUSE_B64_RE } from "@/lib/bytes";
+import { FUSE_B64_RE, UUID_RE } from "@/lib/regex";
 
 const STORAGE_KEY = "taildog.fuseServer";
 
@@ -6,9 +6,6 @@ const STORAGE_KEY = "taildog.fuseServer";
 // Settings override this, so a changing tunnel URL can be fixed without a rebuild.
 const DEFAULT_SERVER =
   ((import.meta.env.VITE_FUSE_SERVER as string | undefined) ?? "").trim() || undefined;
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type DepositResult = {
   id: string;

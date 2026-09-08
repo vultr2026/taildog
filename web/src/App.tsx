@@ -8,8 +8,13 @@ import { SettingsPanel } from "@/components/settings-panel";
 import { hasFuseServer } from "@/lib/fuse-client";
 import { cn } from "@/lib/utils";
 
-// Injected at build time via VITE_APP_VERSION; falls back to "dev" for local runs.
-const APP_VERSION = (import.meta.env.VITE_APP_VERSION as string | undefined) ?? "dev";
+// Resolved at build time: explicit VITE_APP_VERSION wins, otherwise the
+// package.json version injected by vite.config.ts, else "dev".
+declare const __TAILDOG_VERSION__: string | undefined;
+const APP_VERSION =
+  (import.meta.env.VITE_APP_VERSION as string | undefined) ??
+  (typeof __TAILDOG_VERSION__ !== "undefined" ? __TAILDOG_VERSION__ : undefined) ??
+  "dev";
 
 type Tab = "write" | "open" | "settings";
 

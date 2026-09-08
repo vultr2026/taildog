@@ -153,7 +153,11 @@ function corsHeaders(extra = {}) {
   return {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type",
+    // The client sends `ngrok-skip-browser-warning` to bypass ngrok's interstitial;
+    // that's a non-CORS-safelisted header and triggers an OPTIONS check, so it
+    // must be allowed here (along with content-type). Allowing `*` is fine — the
+    // API has no auth and the server never sees plaintext or passphrases.
+    "access-control-allow-headers": "*",
     "access-control-max-age": "86400",
     ...extra,
   };
@@ -295,7 +299,9 @@ server.listen(PORT, HOST, () => {
 function purgeExpired() {
   try {
     deleteExpiredLetters.run();
-    deleteExpiredBurned.run(`+${TTL_DAYS} days`);
+    // Keep a burn receipt for TTL_DAYS after it was written, then drop it so
+    // the table does not grow without bound. (Was `+` — never matched.)
+    deleteExpiredBurned.run(`-${TTL_DAYS} days`);
   } catch {
     // ignore purge errors
   }

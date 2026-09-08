@@ -1,7 +1,7 @@
 {
   "name": "taildog",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.4.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,6 +12,7 @@
   "dependencies": {
     "@capacitor/android": "^8.5.1",
     "@capacitor/cli": "^8.5.1",
+    "@capacitor/clipboard": "^8.0.1",
     "@capacitor/core": "^8.5.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.510.0",

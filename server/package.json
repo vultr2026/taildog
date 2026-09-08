@@ -1,6 +1,6 @@
 {
   "name": "taildog-server",
-  "version": "1.0.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "description": "Self-hosted one-time fuse server for Taildog (zero dependencies).",

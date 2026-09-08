@@ -38,11 +38,19 @@ PORT=9000 FUSE_TTL_DAYS=30 node src/index.mjs
 | Method | Path                | Body            | Response                                                |
 | ------ | ------------------- | --------------- | ------------------------------------------------------- |
 | GET    | `/healthz`          | —               | `200 {"ok":true}`                                       |
+| GET    | `/v1/info`          | —               | `200 {"ok":true,"serverId":"…"}`                        |
 | POST   | `/v1/fuses`         | `{"fuse":"…"}`  | `201 {"id":"…","expiresAt":"…"}`                        |
 | POST   | `/v1/fuses/consume` | `{"id":"…"}`    | `200 {"status":"ok","fuse":"…"}` or `{"status":"consumed"\|"expired"\|"missing"}` |
+| POST   | `/v1/letters`       | `{"fuse":"…","ct":"…"}` | `201 {"id":"…","expiresAt":"…"}`                 |
+| GET    | `/v1/letters/:id`   | —               | `200 {"status":"ok","fuse":"…","ct":"…"}` or `{"status":"burned"\|"missing"}` |
 
-The `consume` endpoint is **atomic and one-shot**: the first successful request withdraws the fuse
-and nulls it, so any later request for the same id returns `"consumed"`.
+- `/v1/fuses` + `/v1/fuses/consume` back the **ciphertext flow**: the writer deposits a one-time
+  fuse, and the reader withdraws it when opening the self-carried `taildog-1.` blob.
+- `/v1/letters` + `/v1/letters/:id` back the **link flow**: the server holds the ciphertext itself
+  (keyed by a short id) and returns + deletes it on the single successful open.
+
+The `consume` endpoints are **atomic and one-shot**: the first successful request withdraws the fuse
+and nulls it, so any later request for the same id returns `"consumed"` (or `"burned"`).
 
 ## HTTPS
 

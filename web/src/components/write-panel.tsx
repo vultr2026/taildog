@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Check, Copy, Eye, EyeOff, Link2 } from "lucide-react";
+import { Check, Copy, Download, Eye, EyeOff, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,18 +10,28 @@ import {
   passwordStrength,
   sealPlaintext,
 } from "@/lib/crypto";
-import { depositLetter, fetchServerId, getFuseServer } from "@/lib/fuse-client";
+import {
+  depositFuse,
+  depositLetter,
+  fetchServerId,
+  getFuseServer,
+} from "@/lib/fuse-client";
 import { serverTag } from "@/lib/server-tag";
-import { FUSE_TTL_DAYS, MAX_PLAINTEXT } from "@/lib/payload";
+import { encodeArmor, FUSE_TTL_DAYS, MAX_PLAINTEXT } from "@/lib/payload";
+import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
+
+type ShareMode = "link" | "cipher";
 
 export function WritePanel() {
   const [body, setBody] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
+  const [mode, setMode] = useState<ShareMode>("link");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [share, setShare] = useState<string | null>(null);
+  const [shareKind, setShareKind] = useState<ShareMode>("link");
   const [copied, setCopied] = useState(false);
   const strength = useMemo(() => passwordStrength(password), [password]);
 
@@ -51,15 +61,28 @@ export function WritePanel() {
     }
     setBusy(true);
     try {
-      const info = await fetchServerId();
-      const tag = await serverTag(info.serverId);
-      const fuse = newFuse();
-      const payload = await sealPlaintext(text, password, fuse, fuse);
-      const deposited = await depositLetter({ fuse, ct: JSON.stringify(payload) });
-      setShare(`${tag}.${deposited.id}`);
+      if (mode === "cipher") {
+        // Offline flow: deposit only the one-time fuse server-side, keep the
+        // whole ciphertext on the device, and hand the recipient a self-contained
+        // armored blob they can send through any channel.
+        const fuse = newFuse();
+        const deposited = await depositFuse({ fuse });
+        const payload = await sealPlaintext(text, password, deposited.id, fuse);
+        setShare(encodeArmor(payload));
+        setShareKind("cipher");
+      } else {
+        // Link flow: store the ciphertext on the server and share a short id.
+        const info = await fetchServerId();
+        const tag = await serverTag(info.serverId);
+        const fuse = newFuse();
+        const payload = await sealPlaintext(text, password, fuse, fuse);
+        const deposited = await depositLetter({ fuse, ct: JSON.stringify(payload) });
+        setShare(`${tag}.${deposited.id}`);
+        setShareKind("link");
+      }
     } catch (err) {
       const code = err instanceof Error ? err.message : "";
-      if (code === "NOSERVER" || code === "SERVER_INFO_FAILED") {
+      if (code === "NOSERVER" || code === "SERVER_INFO_FAILED" || code === "DEPOSIT_FAILED") {
         setError("No fuse server configured. Open Settings and set your server address.");
       } else {
         setError("Sealing failed. Check your connection and try again.");
@@ -70,14 +93,25 @@ export function WritePanel() {
   }
 
   function shareLink(): string {
-    const s = getFuseServer();
-    return s ? `${s.replace(/\/+$/, "")}/#${share}` : "";
+    // Prefer the web app's own origin so the link opens the reader, not the
+    // fuse API. In the Android WebView (file:// or a localhost dev origin) there
+    // is no shareable web origin, so fall back to the fuse server address.
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const webOrigin =
+      origin &&
+      origin !== "null" &&
+      !origin.startsWith("file:") &&
+      !/^https?:\/\/localhost/.test(origin)
+        ? origin
+        : "";
+    const base = webOrigin || getFuseServer();
+    return base ? `${base.replace(/\/+$/, "")}/#${share}` : "";
   }
 
   async function onCopy() {
     if (!share) return;
     try {
-      await navigator.clipboard.writeText(share);
+      await copyText(share);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
@@ -89,11 +123,28 @@ export function WritePanel() {
     const link = shareLink();
     if (!link) return;
     try {
-      await navigator.clipboard.writeText(link);
+      await copyText(link);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
       setError("Copy failed. Long-press the text and copy manually.");
+    }
+  }
+
+  async function onDownload() {
+    if (!share) return;
+    try {
+      const blob = new Blob([share], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "taildog-letter.taildog";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Download failed. Save the text below manually.");
     }
   }
 
@@ -105,15 +156,27 @@ export function WritePanel() {
   }
 
   if (share) {
-    const link = shareLink();
+    const link = shareKind === "link" ? shareLink() : "";
+    const isLink = shareKind === "link";
     return (
       <section className="flex flex-1 flex-col gap-5">
         <header className="space-y-1">
           <h2 className="font-display text-2xl font-medium tracking-tight text-ink">Sealed</h2>
           <p className="text-sm leading-relaxed text-ink-muted text-pretty">
-            Send this ID to the recipient (for example over chat). Send the passphrase separately —
-            never in the same message. Once opened, this letter is destroyed; it also expires after{" "}
-            {FUSE_TTL_DAYS} days if never opened.
+            {isLink ? (
+              <>
+                Send this ID to the recipient (for example over chat). Send the passphrase separately
+                — never in the same message. Once opened, this letter is destroyed; it also expires
+                after {FUSE_TTL_DAYS} days if never opened.
+              </>
+            ) : (
+              <>
+                Send this ciphertext to the recipient over any channel (WeChat, email, a file). The
+                fuse that unlocks it lives on your server and is spent the moment they open it. Send
+                the passphrase separately — never in the same message. It also expires after{" "}
+                {FUSE_TTL_DAYS} days if never opened.
+              </>
+            )}
           </p>
         </header>
         <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-paper-2 px-4 py-3 font-mono text-xs leading-relaxed text-ink-muted shadow-[var(--shadow-border)]">
@@ -122,12 +185,17 @@ export function WritePanel() {
         <div className="grid grid-cols-2 gap-3">
           <Button type="button" onClick={onCopy}>
             {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-            {copied ? "Copied" : "Copy ID"}
+            {copied ? "Copied" : "Copy"}
           </Button>
-          {link ? (
+          {isLink && link ? (
             <Button type="button" variant="outline" onClick={onCopyLink}>
               {copied ? <Check className="size-4" /> : <Link2 className="size-4" />}
               {copied ? "Copied" : "Copy link"}
+            </Button>
+          ) : !isLink ? (
+            <Button type="button" variant="outline" onClick={onDownload}>
+              <Download className="size-4" />
+              Download
             </Button>
           ) : null}
         </div>
@@ -147,6 +215,39 @@ export function WritePanel() {
           opens it once with the same reader and passphrase.
         </p>
       </header>
+
+      <div className="space-y-2">
+        <Label>Share as</Label>
+        <div className="grid grid-cols-2 gap-2 rounded-lg border border-ink/8 bg-paper-2/40 p-1">
+          <button
+            type="button"
+            onClick={() => setMode("link")}
+            className={cn(
+              "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              mode === "link" ? "bg-paper text-ink shadow-[var(--shadow-border)]" : "text-ink-muted",
+            )}
+          >
+            Link
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("cipher")}
+            className={cn(
+              "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              mode === "cipher"
+                ? "bg-paper text-ink shadow-[var(--shadow-border)]"
+                : "text-ink-muted",
+            )}
+          >
+            Ciphertext
+          </button>
+        </div>
+        <p className="text-xs text-ink-subtle">
+          {mode === "link"
+            ? "Store the letter on your server and share a short link/ID."
+            : "Keep the ciphertext on your device and send it yourself (works offline)."}
+        </p>
+      </div>
 
       <div className="space-y-2">
         <Label htmlFor="letter-body">Message</Label>

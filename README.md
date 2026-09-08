@@ -41,10 +41,25 @@ Open the app, go to the **Settings** tab, enter `http://localhost:8787` (or your
 
 ## How to use it
 
-1. **Write** a message and choose a passphrase only the two of you know → **Seal**.
-2. Copy or download the ciphertext and send it to the recipient (the passphrase goes separately).
-3. The recipient pastes the ciphertext and the passphrase under **Open** → the letter opens once,
-   then burns.
+The app has **two ways to share** a sealed letter — pick whichever fits:
+
+### Share a short link (server-hosted)
+
+1. **Write** a message and choose a passphrase only the two of you know.
+2. Keep **Share as → Link** selected and tap **Seal**. The ciphertext is stored on your fuse server
+   and you get a short ID (`<server-tag>.<uuid>`), plus a copyable link.
+3. Send the link/ID to the recipient, and the passphrase **separately** (never in the same message).
+4. The recipient pastes the link/ID and the passphrase under **Open** → the letter opens once, then
+   burns.
+
+### Share ciphertext yourself (works offline)
+
+1. **Write** a message and choose a passphrase only the two of you know.
+2. Switch **Share as → Ciphertext** and tap **Seal**. You get a self-contained `taildog-1.` armored
+   blob (copy it, or tap **Download** to save a `.taildog` file).
+3. Send the ciphertext over any channel (WeChat, email, a file) and the passphrase **separately**.
+4. The recipient pastes the ciphertext (or opens the `.taildog` file) and the passphrase under
+   **Open** → the letter opens once, then burns.
 
 ## Deploying / sharing with others
 
@@ -83,15 +98,20 @@ For a web app served over HTTPS you will also need HTTPS on the server — see
 
 ## Sending a letter to the other party
 
-1. You (the writer) write the message + a passphrase only the two of you know → **Seal** → copy the
-   ciphertext.
-2. Send the **ciphertext** to the recipient over any channel (WeChat / email / etc.).
-3. Send the **passphrase separately** — never in the same message as the ciphertext.
-4. The recipient opens the app (APK or web link), pastes the ciphertext + passphrase under **Open**,
-   and the letter opens once, then burns.
+Either way, the message is encrypted on your device and the passphrase is checked on the recipient's
+device first. What you actually send is a **link/ID** (server-hosted) or a **ciphertext blob**
+(self-carried) — never the passphrase itself.
 
-The fuse-server address is just the location of the shared "mailbox" — it is not a secret and does
-not need to travel with the ciphertext.
+1. You (the writer) write the message + a passphrase only the two of you know → **Seal**.
+2. Send the recipient the **link/ID** (or the **ciphertext** / `.taildog` file) over any channel
+   (WeChat / email / etc.).
+3. Send the **passphrase separately** — never in the same message as the link or ciphertext.
+4. The recipient opens the app (APK or web link), pastes it under **Open**, and the letter opens
+   once, then burns.
+
+The fuse-server address is just the location of the shared "mailbox" — it is not a secret. For the
+link flow both sides must be able to reach it; for the ciphertext flow only the recipient needs it
+at open time (to withdraw the one-time fuse that lives server-side).
 
 ## Android APK (Capacitor)
 
